@@ -1,0 +1,9 @@
+# ~/.codeagent/config.yaml
+model: qwen2.5-coder:7b
+host: http://localhost:11434
+timeout: 120
+models:
+  planner: llama3.1:8b
+  coder: qwen2.5-coder:7b
+  reviewer: qwen2.5:7b
+  fixer: qwen2.5-coder:7b

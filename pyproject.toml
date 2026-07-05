@@ -1,0 +1,47 @@
+[project]
+name = "codeagent"
+version = "0.1.0"
+description = "CLI agent that writes, runs, checks, and fixes code locally with Ollama"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "your@email.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "ollama>=0.1.0",
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.0.200",
+]
+
+[project.scripts]
+codeagent = "codeagent.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SickSect/CLI-code-agent"
+Repository = "https://github.com/SickSect/CLI-code-agent"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N"]
