@@ -3,9 +3,9 @@ name = "codeagent"
 version = "0.1.0"
 description = "CLI agent that writes, runs, checks, and fixes code locally with Ollama"
 readme = "README.md"
-authors = [
-    {name = "Your Name", email = "your@email.com"}
-]
+        authors = [
+            {name = "Aleksei Zalogin", email = "slewepyboy906sb@gmail.com"}
+        ]
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
@@ -15,16 +15,16 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
-[project.optional-dependencies]
+[project.optional-dependencies]   # было [project.optional-dev] – исправлено
 dev = [
     "pytest>=7.0.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
-    "ruff>=0.0.200",
+    "ruff>=0.200",
 ]
 
 [project.scripts]
-codeagent = "codeagent.cli:main"
+codeagent = "codeagent.cli:main"   # должно указывать на функцию в cli.py
 
 [project.urls]
 Homepage = "https://github.com/SickSect/CLI-code-agent"
@@ -36,7 +36,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.black]
 line-length = 100
-target-version = ['py310']
+target-version = ['py310']   # было ['p'] – исправлено
 
 [tool.mypy]
 python_version = "3.10"

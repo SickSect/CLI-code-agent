@@ -1,6 +1,7 @@
 from typing import Optional, Dict
-from src.codeagent.client import ModelClient
-from src.codeagent.state import AgentState
+
+from codeagent.client import ModelClient
+from codeagent.state import AgentState
 
 
 class Agent:
@@ -30,7 +31,7 @@ class Agent:
 
     def coder(self, state: AgentState, context: Optional[Dict] = None) -> AgentState:
         """Агент-кодер: генерирует код по задаче."""
-        state.set_role("coder")
+        state.role = "coder"
 
         # Если контекст не передан, используем системный промпт
         if context is None:

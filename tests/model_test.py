@@ -1,9 +1,7 @@
 """Quick test for Ollama client with config."""
-from altair.utils import Optional
-
-from src.codeagent.agent import Agent
-from src.codeagent.client import get_client, list_models
-from src.codeagent.state import AgentState
+from codeagent.agent import Agent
+from codeagent.client import list_models, get_client
+from codeagent.state import AgentState
 
 
 def test_ollama():
@@ -60,3 +58,4 @@ def test_coder():
 
 if __name__ == "__main__":
     test_ollama()
+    test_coder()
