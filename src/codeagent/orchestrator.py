@@ -4,7 +4,7 @@ from typing import Optional
 from codeagent.agent import Agent
 from codeagent.client import ModelClient, get_client
 from codeagent.code_agent_logger import CodeAgentLogger
-from codeagent.executor import execute_code
+from codeagent.executor import execute_code, strip_code_fences
 from codeagent.state import AgentState
 
 
@@ -45,6 +45,22 @@ class Orchestrator:
         self.reviewer = Agent("reviewer", client, reviewer_prompt)
 
 
+def _is_approved(review: str) -> bool:
+    """Return True only when the reviewer clearly signalled approval.
+
+    The reviewer is instructed to answer with exactly "OK" on success. We look
+    at the first non-empty line and normalise trivial formatting (surrounding
+    quotes, backticks, asterisks, a trailing period) before comparing, so that
+    "NOT OK" or "OK, but fix X" are NOT mistaken for a pass.
+    """
+    stripped = review.strip()
+    if not stripped:
+        return False
+    first_line = stripped.splitlines()[0]
+    cleaned = first_line.strip(" \t\"'`.*").upper()
+    return cleaned == "OK"
+
+
 def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5, verbose: bool = True) -> AgentState:
     logger = CodeAgentLogger(verbose=verbose)
     logger.info(f"Starting task: {task}")
@@ -63,7 +79,7 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
     # 2. Coder
     logger.step("Coder", input_summary=f"Task: {task}\nPlan: {plan}")
     code = orch.coder.run(user_prompt=f"Task: {task}\nPlan: {plan}", context={"plan": plan})
-    state.code = code
+    state.code = strip_code_fences(code)
     logger.debug(f"Generated code:\n{code}")
 
     # 3. Цикл ревью-фикс
@@ -97,7 +113,7 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
         state.review = review
         logger.debug(f"Review:\n{review}")
 
-        if "OK" in review.strip().upper():
+        if _is_approved(review):
             state.done = True
             logger.info("Reviewer approved the code. Done!")
             break
@@ -112,7 +128,7 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
             ),
             context={"review": review}
         )
-        state.code = fixed
+        state.code = strip_code_fences(fixed)
         state.iteration = i + 1
         logger.debug(f"Fixed code:\n{fixed}")
 
