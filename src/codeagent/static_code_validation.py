@@ -1,6 +1,6 @@
 # реестр: сейчас один язык, дальше дописываешь строки
 import ast
-from codeagent.executor import ExecutionResult
+from codeagent.exec_result import ExecutionResult
 
 
 def _validate_python(code: str) -> ExecutionResult:
@@ -26,4 +26,3 @@ def definite_static_validate(code: str, language: str) -> ExecutionResult:
             error=f"No static validator for '{language}' yet — code left unvalidated",
         )
     return validator(code)
-

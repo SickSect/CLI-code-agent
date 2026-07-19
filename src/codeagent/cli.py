@@ -148,6 +148,20 @@ def doctor() -> None:
     if not ok:
         click.echo(f"Pull it with:  ollama pull {client.model}")
 
+@main.command()
+def chat():
+    """Interactive session: send tasks one by one; /save <path>, /exit."""
+    last_state = None
+    while True:
+        user_input = click.prompt("codeagent", type=str).strip()
+
+        if user_input.startswith("/"):
+            print("your command is ", user_input)
+            continue
+
+        # обычная задача -> прогнать цикл, запомнить результат
+        last_state = run_agent_loop(user_input, allow_exec=..., verbose=...)
+        click.echo(last_state.code or "(no code produced)")
 
 if __name__ == "__main__":
     main()

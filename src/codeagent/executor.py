@@ -69,7 +69,7 @@ def run_in_docker(code: str,
                   image: str = "python:3.12-slim",
                   script_name: str = "script.py",
                   timeout: int = 10,
-                  ):
+                  ) -> ExecutionResult:
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = Path(tmpdir) / script_name
         script_path.write_text(code, encoding="utf-8")
@@ -98,7 +98,7 @@ def run_in_docker(code: str,
 
         try:
             result = subprocess.run(
-                args,  # -I = isolated mode
+                args,
                 **run_kwargs,
             )
 
@@ -179,7 +179,7 @@ def run_in_subprocess(
         except Exception as e:
             return ExecutionResult(False, error=f"Execution error: {e}")
 
-def _docker_available(timeout) -> bool:
+def _docker_available(timeout: int = 5) -> bool:
     run_kwargs = dict(
         capture_output=True,
         text=True,
@@ -187,12 +187,12 @@ def _docker_available(timeout) -> bool:
     )
     try:
         docker_contains = subprocess.run(
-            ['docker', '--version'],  # -I = isolated mode
+            ['docker', '--version'],
             **run_kwargs,
         )
-        if docker_contains.stdout.__contains__('Docker version'):
+        if 'Docker version' in docker_contains.stdout:
             return True
-    except Exception as e:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
     return False
 
@@ -216,10 +216,9 @@ def execute_code(code: str,
 
     if backend == 'docker':
         if _docker_available(timeout):
-            return run_in_docker(code)
-        else:
-            return static
-    elif backend == 'subprocess' and allow_exec:
-        result = run_in_subprocess(code)
-        return result
-    return static
+            return run_in_docker(code, timeout=timeout)
+        return ExecutionResult(
+            success=False,
+            error="Docker backend requested but Docker is not available",
+        )
+    return run_in_subprocess(code, timeout=timeout)
