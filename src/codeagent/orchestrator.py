@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -39,10 +40,10 @@ class Orchestrator:
             reviewer_prompt = file.read()
 
         # Создаём агентов (исправлено: reviewer теперь "reviewer", а не "coder")
-        self.coder = Agent("coder", client, coder_prompt)
-        self.fixer = Agent("fixer", client, fixer_prompt)
-        self.planner = Agent("planner", client, planner_prompt)
-        self.reviewer = Agent("reviewer", client, reviewer_prompt)
+        self.coder = Agent("coder", client, coder_prompt, 0.3)
+        self.fixer = Agent("fixer", client, fixer_prompt, 0.2)
+        self.planner = Agent("planner", client, planner_prompt, 0.7)
+        self.reviewer = Agent("reviewer", client, reviewer_prompt,0.1)
 
 
 def _is_approved(review: str) -> bool:
@@ -70,15 +71,26 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
     state = AgentState(max_iterations)
     state.task = task
 
-    # 1. Планирование
+    # 1. Планирование — планировщик отдаёт JSON {"language": ..., "plan": [...]}
     logger.step("Planner", input_summary=task)
-    plan = orch.planner.run(user_prompt=task, context={"task": task})
-    state.plan = plan
-    logger.debug(f"Plan:\n{plan}")
+    raw_plan = orch.planner.run(user_prompt=task, context={"task": task})
+
+    cleaned = strip_code_fences(raw_plan)          # снять ```json ... ``` если есть
+    try:
+        data = json.loads(cleaned)
+        state.lang = data["language"].lower()      # правильный ключ + нормализация
+        plan_steps = data["plan"]                  # массив шагов
+    except (json.JSONDecodeError, KeyError, AttributeError):
+        state.lang = "python"                      # фолбэк: не распарсили — Python
+        plan_steps = [raw_plan]                    # хоть что-то отдать коудеру
+
+    # план — массив шагов, коудеру нужна строка: склеиваем в нумерованный список
+    state.plan = "\n".join(f"{i+1}. {s}" for i, s in enumerate(plan_steps))
+    logger.debug(f"Language: {state.lang}\nPlan:\n{state.plan}")
 
     # 2. Coder
-    logger.step("Coder", input_summary=f"Task: {task}\nPlan: {plan}")
-    code = orch.coder.run(user_prompt=f"Task: {task}\nPlan: {plan}", context={"plan": plan})
+    logger.step("Coder", input_summary=f"Task: {task}\nPlan: {state.plan}")
+    code = orch.coder.run(user_prompt=f"Task: {task}\nPlan: {state.plan}", context={"plan": state.plan})
     state.code = strip_code_fences(code)
     logger.debug(f"Generated code:\n{code}")
 
@@ -88,8 +100,7 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
 
         # --- ВЫПОЛНЕНИЕ КОДА ---
         logger.step("Executor", input_summary="Running the code...")
-        exec_result = execute_code(state.code, allow_exec=allow_exec, timeout=10)
-        # Сохраняем результаты выполнения в state
+        exec_result = execute_code(state.code, allow_exec=allow_exec, timeout=10, language=state.lang)  # <- проброс языка
         state.test_results = (
             f"STDOUT:\n{exec_result.output}\n"
             f"STDERR:\n{exec_result.error}\n"
@@ -101,7 +112,6 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
 
         # --- РЕВЬЮ ---
         logger.step("Reviewer", input_summary=f"Code length: {len(state.code)} chars")
-        # Передаём в ревью код, задачу и результаты выполнения
         review = orch.reviewer.run(
             user_prompt=(
                 f"Task: {task}\n"

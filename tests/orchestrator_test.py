@@ -1,5 +1,5 @@
 # tests/test_orchestrator.py
-from codeagent.executor import static_validate, execute_code
+from codeagent.executor import execute_code
 from codeagent.orchestrator import run_agent_loop
 
 

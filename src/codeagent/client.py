@@ -75,17 +75,30 @@ class ModelClient:
         except Exception:
             return []
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    def generate(self,
+                 prompt: str,
+                 system_prompt:
+                 Optional[str] = None,
+                 temperature: float = 0.5,
+                 num_ctx: int = 4096,
+                 seed: int = None) -> str:
         """Send a prompt to Model and get the response."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        options = {
+                "temperature": temperature,
+                "num_ctx": num_ctx
+            }
+        if seed is not None:
+            options["seed"] = seed
 
         response = self.client.chat(
             model=self.model,
             messages=messages,
             stream=False,
+            options=options
         )
         return response["message"]["content"]
 

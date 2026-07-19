@@ -5,15 +5,28 @@ from codeagent.state import AgentState
 
 
 class Agent:
-    def __init__(self, name: str, client: ModelClient, system_prompt: str):
+    def __init__(self,
+                 name: str,
+                 client: ModelClient,
+                 system_prompt: str,
+                 temperature: float = 0.5,
+                 num_ctx: int = 4096,
+                 seed: int = None):
         self.name = name
         self.client = client
         self.system_prompt = system_prompt
+        self.temperature = temperature
+        self.num_ctx = num_ctx
+        self.seed = seed
 
     def run(self, user_prompt: str, context: Optional[Dict] = None) -> str:
         """Выполняет задачу агента, формируя полный промпт."""
         full_prompt = self._build_prompt(user_prompt, context)
-        return self.client.generate(full_prompt, self.system_prompt)
+        return self.client.generate(full_prompt,
+                                    self.system_prompt,
+                                    self.temperature,
+                                    self.num_ctx,
+                                    self.seed)
 
     def _build_prompt(self, user_prompt: str, context: Optional[Dict]) -> str:
         """Формирует промпт из user_prompt и контекста (ключ-значение)."""
