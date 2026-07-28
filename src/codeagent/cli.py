@@ -71,14 +71,23 @@ def main() -> None:
     default=None,
     help="Write the final code to this file.",
 )
+@click.option(
+    "--backend",
+    type=click.Choice(["subprocess", "docker"]),
+    default="subprocess",
+    show_default=True)
 @click.option("-q", "--quiet", is_flag=True, help="Suppress step-by-step logs.")
+@click.option("-t", "--timeout", default=10, show_default=True,
+              help="Seconds before a single execution is killed.")
 def run(
-    task: str,
-    allow_exec: bool,
-    iterations: int,
-    model: str | None,
-    output: Path | None,
-    quiet: bool,
+        task: str,
+        allow_exec: bool,
+        iterations: int,
+        model: str | None,
+        output: Path | None,
+        quiet: bool,
+        backend: str,
+        timeout: int
 ) -> None:
     """Generate, review and fix code for TASK."""
     # Creating the client here (a) lets us fail fast on a dead backend and
@@ -93,6 +102,8 @@ def run(
         allow_exec=allow_exec,
         max_iterations=iterations,
         verbose=not quiet,
+        backend=backend,
+        timeout=timeout,
     )
 
     click.echo()
@@ -148,20 +159,65 @@ def doctor() -> None:
     if not ok:
         click.echo(f"Pull it with:  ollama pull {client.model}")
 
+
 @main.command()
-def chat():
+@click.option("--exec/--no-exec", "allow_exec", default=False,
+              help="Actually run the generated code in a sandbox.")
+@click.option("-n", "--iterations", default=5, show_default=True,
+              help="Maximum number of review/fix iterations.")
+@click.option("--backend", type=click.Choice(["subprocess", "docker"]),
+              default="subprocess", show_default=True,
+              help="Where to run the code.")
+@click.option("-q", "--quiet", is_flag=True, help="Suppress step-by-step logs.")
+@click.option("-t", "--timeout", default=10, show_default=True,
+              help="Seconds before a single execution is killed.")
+def chat(allow_exec, iterations, backend, quiet, timeout):
     """Interactive session: send tasks one by one; /save <path>, /exit."""
     last_state = None
-    while True:
-        user_input = click.prompt("codeagent", type=str).strip()
+    try:
+        while True:
+            user_input = click.prompt("codeagent", type=str).strip()
+            if not user_input:
+                continue
 
-        if user_input.startswith("/"):
-            print("your command is ", user_input)
-            continue
+            if user_input.startswith("/"):
+                parts = user_input.split(maxsplit=1)
+                cmd = parts[0]
+                if cmd == "/exit":
+                    break
+                elif cmd == "/save":
+                    if len(parts) < 2:
+                        click.echo("Usage: /save <path>")
+                    elif last_state is None or not last_state.code:
+                        click.echo("Nothing to save yet - run a task first.")
+                    else:
+                        target = Path(parts[1])
+                        target.write_text(last_state.code, encoding="utf-8")
+                        click.secho(f"Saved to {target}", fg="cyan")
+                elif cmd == "/new":
+                    last_state = None
+                    click.echo("Session context cleared.")
+                else:
+                    click.echo(f"Unknown command: {cmd}")
+                continue
 
-        # обычная задача -> прогнать цикл, запомнить результат
-        last_state = run_agent_loop(user_input, allow_exec=..., verbose=...)
-        click.echo(last_state.code or "(no code produced)")
+            try:
+                last_state = run_agent_loop(
+                    user_input,
+                    allow_exec=allow_exec,
+                    max_iterations=iterations,
+                    backend=backend,
+                    verbose=not quiet,
+                    timeout=timeout,
+                    last_state=last_state
+                )
+            except Exception as e:
+                click.secho(f"Task failed: {e}", fg="red", err=True)
+                continue
+            click.echo(last_state.code or "(no code produced)")
+    except (KeyboardInterrupt, EOFError):
+        click.echo("\nBye!")
+
 
 if __name__ == "__main__":
     main()

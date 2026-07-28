@@ -12,6 +12,8 @@ class AgentState:
         self.max_iterations = max_iterations
         self.done = False
         self.lang = lang
+        self.previous_code = None
+        self.asserts = None
 
     def increment(self):
         if self.iteration >= self.max_iterations:
@@ -19,4 +21,15 @@ class AgentState:
             return False
         self.iteration += 1
         return True
+
+    def leave_prev_code(self):
+        self.task = None
+        self.plan = None
+        self.previous_code = self.code
+        self.test_results = None
+        self.review = None
+        self.iteration = 0
+        self.done = False
+        self.code = None
+        self.asserts = None
 

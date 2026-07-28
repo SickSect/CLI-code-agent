@@ -14,7 +14,9 @@ class Orchestrator:
                  coder_prompt_file_path: Optional[str] = None,
                  fixer_prompt_file_path: Optional[str] = None,
                  planner_prompt_file_path: Optional[str] = None,
-                 reviewer_prompt_file_path: Optional[str] = None):
+                 reviewer_prompt_file_path: Optional[str] = None,
+                 tester_prompt_file_path: Optional[str] = None
+                 ):
 
         # Базовая папка — где лежит этот файл (orchestrator.py)
         base_dir = Path(__file__).parent
@@ -28,6 +30,8 @@ class Orchestrator:
             planner_prompt_file_path = base_dir / "system_prompts" / "planner_prompt_base.md"
         if reviewer_prompt_file_path is None:
             reviewer_prompt_file_path = base_dir / "system_prompts" / "reviewer_prompt_base.md"
+        if tester_prompt_file_path is None:
+            tester_prompt_file_path = base_dir / "system_prompts" / "tester_prompt_base.md"
 
         # Читаем промпты
         with open(coder_prompt_file_path, 'r', encoding='utf-8') as file:
@@ -38,12 +42,15 @@ class Orchestrator:
             planner_prompt = file.read()
         with open(reviewer_prompt_file_path, 'r', encoding='utf-8') as file:
             reviewer_prompt = file.read()
+        with open(tester_prompt_file_path, 'r', encoding='utf-8') as file:
+            tester_prompt = file.read()
 
         # Создаём агентов (исправлено: reviewer теперь "reviewer", а не "coder")
         self.coder = Agent("coder", client, coder_prompt, 0.3)
         self.fixer = Agent("fixer", client, fixer_prompt, 0.2)
         self.planner = Agent("planner", client, planner_prompt, 0.7)
         self.reviewer = Agent("reviewer", client, reviewer_prompt,0.1)
+        self.tester = Agent("tester", client, tester_prompt,0.3)
 
 
 def _is_approved(review: str) -> bool:
@@ -62,18 +69,30 @@ def _is_approved(review: str) -> bool:
     return cleaned == "OK"
 
 
-def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5, verbose: bool = True) -> AgentState:
+def run_agent_loop(task: str,
+                   allow_exec: bool = False,
+                   max_iterations: int = 5,
+                   verbose: bool = True,
+                   backend: str = "subprocess",
+                   timeout=10,
+                   last_state: AgentState = None) -> AgentState:
     logger = CodeAgentLogger(verbose=verbose)
     logger.info(f"Starting task: {task}")
 
     client = get_client()
     orch = Orchestrator(client)
-    state = AgentState(max_iterations)
-    state.task = task
+    if last_state is None:
+        state = AgentState(max_iterations)
+    else:
+        state = last_state
+    state.leave_prev_code()
 
     # 1. Планирование — планировщик отдаёт JSON {"language": ..., "plan": [...]}
-    logger.step("Planner", input_summary=task)
-    raw_plan = orch.planner.run(user_prompt=task, context={"task": task})
+    if state.previous_code:
+        planner_input = f"Previous code:\n{state.previous_code}\n\nTask: {task}"
+    else:
+        planner_input = task
+    raw_plan = orch.planner.run(user_prompt=planner_input, context={"task": task})
 
     cleaned = strip_code_fences(raw_plan)          # снять ```json ... ``` если есть
     try:
@@ -89,18 +108,57 @@ def run_agent_loop(task: str, allow_exec: bool = False, max_iterations: int = 5,
     logger.debug(f"Language: {state.lang}\nPlan:\n{state.plan}")
 
     # 2. Coder
+    if state.previous_code is not None:
+        coder_prompt = (
+            f"Previous code:\n{state.previous_code}\n\n"
+            f"The task below may continue or modify the code above.\n"
+            f"Task: {task}\nPlan: {state.plan}"
+        )
+    else:
+        coder_prompt = f"Task: {task}\nPlan: {state.plan}"
     logger.step("Coder", input_summary=f"Task: {task}\nPlan: {state.plan}")
-    code = orch.coder.run(user_prompt=f"Task: {task}\nPlan: {state.plan}", context={"plan": state.plan})
+    code = orch.coder.run(user_prompt=coder_prompt, context={"plan": state.plan})
     state.code = strip_code_fences(code)
     logger.debug(f"Generated code:\n{code}")
 
+    # 2. Coder
+    if state.previous_code is not None:
+        coder_prompt = (
+            f"Previous code:\n{state.previous_code}\n\n"
+            f"The task below may continue or modify the code above.\n"
+            f"Task: {task}\nPlan: {state.plan}"
+        )
+    else:
+        coder_prompt = f"Task: {task}\nPlan: {state.plan}"
+    logger.step("Coder", input_summary=f"Task: {task}\nPlan: {state.plan}")
+    code = orch.coder.run(user_prompt=coder_prompt, context={"plan": state.plan})
+    state.code = strip_code_fences(code)
+    logger.debug(f"Generated code:\n{code}")
+
+    # 2b. Tester — один раз, assert'ы к этому коду
+    logger.step("Tester", input_summary=f"Code length: {len(state.code)} chars")
+    tester_prompt = (
+        f"Task: {task}\n"
+        f"Code:\n{state.code}\n"
+        f"Write assertions that verify this code."
+    )
+    state.asserts = strip_code_fences(
+        orch.tester.run(user_prompt=tester_prompt, context={"code": state.code})
+    )
+    logger.debug(f"Asserts:\n{state.asserts}")
+
     # 3. Цикл ревью-фикс
     for i in range(max_iterations):
-        logger.info(f"Iteration {i+1}/{max_iterations}")
+        logger.info(f"Iteration {i + 1}/{max_iterations}")
 
-        # --- ВЫПОЛНЕНИЕ КОДА ---
-        logger.step("Executor", input_summary="Running the code...")
-        exec_result = execute_code(state.code, allow_exec=allow_exec, timeout=10, language=state.lang)  # <- проброс языка
+        # --- ВЫПОЛНЕНИЕ КОДА + ТЕСТОВ ---
+        logger.step("Executor", input_summary="Running the code with asserts...")
+        code_with_tests = state.code + "\n\n" + state.asserts
+        exec_result = execute_code(code_with_tests,
+                                   allow_exec=allow_exec,
+                                   timeout=timeout,
+                                   backend=backend,
+                                   language=state.lang)
         state.test_results = (
             f"STDOUT:\n{exec_result.output}\n"
             f"STDERR:\n{exec_result.error}\n"
