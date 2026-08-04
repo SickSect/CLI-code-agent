@@ -38,6 +38,7 @@ def _resource_limits(mem_mb: int, cpu_secs: int):
 
     return _apply
 
+
 def strip_code_fences(text: str) -> str:
     """Extract runnable code from a model response, dropping markdown fences.
 
@@ -60,6 +61,7 @@ def strip_code_fences(text: str) -> str:
         if inside:
             captured.append(line)
     return "\n".join(captured).strip() if captured else text.strip()
+
 
 def run_in_docker(code: str,
                   v: str = ":/app:ro",
@@ -101,6 +103,52 @@ def run_in_docker(code: str,
                 args,
                 **run_kwargs,
             )
+
+            if result.returncode == 0:
+                return ExecutionResult(
+                    success=True,
+                    output=result.stdout,
+                    error=result.stderr,
+                    returncode=result.returncode,
+                )
+            return ExecutionResult(
+                success=False,
+                output=result.stdout,
+                error=result.stderr or result.stdout,
+                returncode=result.returncode,
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(False, error=f"Timeout after {timeout}s")
+        except Exception as e:
+            return ExecutionResult(False, error=f"Execution error: {e}")
+
+
+def run_files_in_docker(files_content: dict,
+                        entry: str,
+                        network: str = "none",
+                        memory: str = "256m",
+                        pids_limit: int = 32,
+                        image: str = "python:3.12-slim",
+                        timeout: int = 10,
+                        ):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for path, content in files_content.items():
+            file_path = Path(tmpdir) / path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+
+        args = [
+            "docker", "run", "--rm",
+            "-v", f"{Path(tmpdir).as_posix()}:/app:ro",
+            "--network", network,
+            "--memory", memory,
+            "--pids-limit", str(pids_limit),
+            "-w", "/app",  # рабочая папка -> импорты меж файлами
+            image,
+            "python", entry,
+        ]
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
             if result.returncode == 0:
                 return ExecutionResult(
@@ -179,6 +227,7 @@ def run_in_subprocess(
         except Exception as e:
             return ExecutionResult(False, error=f"Execution error: {e}")
 
+
 def _docker_available(timeout: int = 5) -> bool:
     run_kwargs = dict(
         capture_output=True,
@@ -196,11 +245,48 @@ def _docker_available(timeout: int = 5) -> bool:
         return False
     return False
 
+
+def run_files(files_content: dict,
+              entry: str,
+              timeout=10):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for path, content in files_content.items():
+            (Path(tmpdir) / path).write_text(content, encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [sys.executable, entry],
+                cwd=tmpdir,
+                timeout=timeout,
+                text=True,
+                capture_output=True,
+                env={**os.environ, "PYTHONPATH": ""},
+            )
+            if result.returncode == 0:
+                return ExecutionResult(
+                    success=True,
+                    output=result.stdout,
+                    error=result.stderr,
+                    returncode=result.returncode,
+                )
+            return ExecutionResult(
+                success=False,
+                output=result.stdout,
+                error=result.stderr or result.stdout,
+                returncode=result.returncode,
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(False, error=f"Timeout after {timeout}s")
+        except Exception as e:
+            return ExecutionResult(False, error=f"Execution error: {e}")
+
+
 def execute_code(code: str,
                  allow_exec: bool = False,
                  timeout: int = 10,
                  backend: str = "subprocess",
-                 language: str = "python") -> ExecutionResult:
+                 language: str = "python",
+                 files_content: dict = None,
+                 entry: str = None) -> ExecutionResult:
     """
     Main entry point for code execution.
     Always runs static validation.
@@ -214,11 +300,14 @@ def execute_code(code: str,
     if not allow_exec:
         return static
 
-    if backend == 'docker':
-        if _docker_available(timeout):
-            return run_in_docker(code, timeout=timeout)
-        return ExecutionResult(
-            success=False,
-            error="Docker backend requested but Docker is not available",
-        )
+    if files_content:
+        for path, content in files_content.items():
+            result = definite_static_validate(content, language)
+            if not result.success:
+                return ExecutionResult(False, error=f"{path}: {result.error}")
+        if backend == "docker":
+            if _docker_available(timeout):
+                return run_files_in_docker(files_content, entry, timeout=timeout)
+            return ExecutionResult(False, error="Docker backend requested but Docker is not available")
+        return run_files(files_content, entry, timeout=timeout)
     return run_in_subprocess(code, timeout=timeout)

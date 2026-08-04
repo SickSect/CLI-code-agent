@@ -185,15 +185,27 @@ def chat(allow_exec, iterations, backend, quiet, timeout):
                 cmd = parts[0]
                 if cmd == "/exit":
                     break
+                elif cmd == "/context":
+                    if last_state and last_state.files_content:
+                        click.echo(f"Context: {list(last_state.files_content)}")
+                    else:
+                        click.echo("Context is empty.")
                 elif cmd == "/save":
                     if len(parts) < 2:
                         click.echo("Usage: /save <path>")
-                    elif last_state is None or not last_state.code:
+                    elif last_state is None or not last_state.files_content:
                         click.echo("Nothing to save yet - run a task first.")
                     else:
-                        target = Path(parts[1])
-                        target.write_text(last_state.code, encoding="utf-8")
-                        click.secho(f"Saved to {target}", fg="cyan")
+                        target_dir = Path(parts[1])
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        for path, content in last_state.files_content.items():
+                            file_path = target_dir / path
+                            file_path.parent.mkdir(parents=True, exist_ok=True)
+                            file_path.write_text(content, encoding="utf-8")
+                        click.secho(
+                            f"Saved {len(last_state.files_content)} files to {target_dir}",
+                            fg="cyan",
+                        )
                 elif cmd == "/new":
                     last_state = None
                     click.echo("Session context cleared.")
