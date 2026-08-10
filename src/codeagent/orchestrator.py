@@ -9,7 +9,7 @@ from codeagent.executor import execute_code, strip_code_fences
 from codeagent.state import AgentState
 
 # Name of the generated test file. It is written next to the product files so
-# plain imports (e.g. `from service import X`) resolve, and it is what we run.
+# imports that match the file paths resolve, and it is what we run.
 TESTS_FILE = "_tests.py"
 
 
@@ -163,7 +163,7 @@ def run_tester(state: AgentState, task: str, orch: Orchestrator, verbose):
         f"Task: {task}\n"
         f"Code:\n{_files_to_text(state.files_content)}\n"
         f"Write the full content of {TESTS_FILE}: import what you need from the "
-        f"modules above by module name, then assert on their return values."
+        f"modules above by their paths, then assert on their return values."
     )
     state.asserts = strip_code_fences(
         orch.tester.run(user_prompt=tester_prompt, context={"code": state.code})
@@ -179,6 +179,7 @@ def run_execution(state: AgentState, allow_exec, timeout, backend, verbose):
 
     files_to_run = dict(state.files_content)   # copy: state keeps only product files
     files_to_run[TESTS_FILE] = state.asserts   # tests live next to the modules
+    logger.debug(f"Backend: {backend}, files: {list(files_to_run)}")
 
     exec_result = execute_code(state.asserts,
                                allow_exec=allow_exec,
@@ -218,13 +219,23 @@ def run_review(state: AgentState, task, orch: Orchestrator, verbose):
     logger = CodeAgentLogger(verbose=verbose)
     logger.step("Reviewer", input_summary=f"Files: {list(state.files_content)}")
 
+    reviewer_prompt = (
+        f"Task: {task}\n"
+        f"Code:\n{_files_to_text(state.files_content)}\n"
+        f"Execution results:\n{state.test_results}"
+    )
+    # state.review still holds the PREVIOUS iteration's review at this point:
+    # showing it keeps the reviewer from repeating advice that already failed.
+    if state.review:
+        reviewer_prompt += (
+            f"\n\nYour previous review said:\n{state.review}\n"
+            f"That instruction did not fix the problem. If the same error "
+            f"persists, propose a different fix, not the same one."
+        )
+
     review = orch.reviewer.run(
-        user_prompt=(
-            f"Task: {task}\n"
-            f"Code:\n{_files_to_text(state.files_content)}\n"
-            f"Execution results:\n{state.test_results}"
-        ),
-        context={"code": state.code, "exec_results": state.test_results}
+        user_prompt=reviewer_prompt,
+        context={"code": state.code, "exec_results": state.test_results},
     )
     state.review = review
     logger.debug(f"Review:\n{review}")
@@ -245,9 +256,12 @@ def run_fixer(state: AgentState, task, orch: Orchestrator, verbose):
         ),
         context={"review": state.review}
     )
-    state.files_content = _parse_files(fixed, state.entry)
+    fixed_files = _parse_files(fixed, state.entry)
+    # Merge, do not replace: the model often returns only the files it touched,
+    # and replacing would silently drop the rest of the project.
+    state.files_content = {**state.files_content, **fixed_files}
     state.code = state.files_content.get(state.entry, "")
-    logger.debug(f"Fixed files: {list(state.files_content)}")
+    logger.debug(f"Fixed files: {list(fixed_files)}")
     return state
 
 
@@ -280,10 +294,22 @@ def run_agent_loop(task: str,
     state = run_tester(state, task, orch, verbose)
 
     # 3. Цикл ревью-фикс
+    previous_results = None   # execution output of the previous iteration
     for i in range(max_iterations):
         logger.info(f"Iteration {i + 1}/{max_iterations}")
 
         state = run_execution(state, allow_exec, timeout, backend, verbose)
+
+        # Stop when a failing run repeats itself: the fixer changed nothing that
+        # matters, so another round would only burn time. Compared after the run
+        # (never before it), and only for failures — a passing run may still be
+        # improved on style.
+        failed = "Returncode: 0" not in state.test_results
+        if failed and state.test_results == previous_results:
+            logger.warning("No progress: the same failure repeated, stopping")
+            break
+        previous_results = state.test_results
+
         state = run_review(state, task, orch, verbose)
 
         if _is_approved(state.review):
