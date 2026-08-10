@@ -179,7 +179,7 @@ def run_execution(state: AgentState, allow_exec, timeout, backend, verbose):
 
     files_to_run = dict(state.files_content)   # copy: state keeps only product files
     files_to_run[TESTS_FILE] = state.asserts   # tests live next to the modules
-    logger.debug(f"Backend: {backend}, files: {list(files_to_run)}")
+
     exec_result = execute_code(state.asserts,
                                allow_exec=allow_exec,
                                timeout=timeout,
@@ -192,6 +192,19 @@ def run_execution(state: AgentState, allow_exec, timeout, backend, verbose):
         f"STDERR:\n{exec_result.error}\n"
         f"Returncode: {exec_result.returncode}"
     )
+
+    # Assign first, then read: the flag from the previous iteration must not
+    # leak into this one.
+    state.validated = exec_result.validated
+    state.validation_note = None if exec_result.validated else exec_result.error
+    if not state.validated:
+        # Tell the reviewer explicitly, or it will approve unchecked code.
+        state.test_results += (
+            f"\nNOTE: this code was NOT validated or executed "
+            f"({state.validation_note})"
+        )
+        logger.warning(f"Not validated: {state.validation_note}")
+
     logger.debug(
         f"Execution result: success={exec_result.success}, returncode={exec_result.returncode}"
     )
@@ -232,8 +245,7 @@ def run_fixer(state: AgentState, task, orch: Orchestrator, verbose):
         ),
         context={"review": state.review}
     )
-    fixed_files = _parse_files(fixed, state.entry)
-    state.files_content = {**state.files_content, **fixed_files}
+    state.files_content = _parse_files(fixed, state.entry)
     state.code = state.files_content.get(state.entry, "")
     logger.debug(f"Fixed files: {list(state.files_content)}")
     return state

@@ -37,6 +37,24 @@ def _require_backend(client) -> None:
         raise SystemExit(1)
 
 
+def _warn_if_unvalidated(state) -> None:
+    """Tell the user when the code was never checked.
+
+    validated=False means there was no toolchain (or no validator) for that
+    language — not that the code is wrong. So this is a warning, not an error,
+    and the code is still shown.
+    """
+    if state.validated:
+        return
+    click.secho(
+        "Warning: this code was NOT statically validated and was not executed — "
+        "it may contain syntax errors.",
+        fg="yellow",
+    )
+    if state.validation_note:
+        click.secho(f"  Reason: {state.validation_note}", fg="yellow")
+
+
 @click.group()
 @click.version_option("0.1.0", prog_name="codeagent")
 def main() -> None:
@@ -52,30 +70,24 @@ def main() -> None:
     help="Actually run the generated code in a sandbox (default: static check only).",
 )
 @click.option(
-    "-n",
-    "--iterations",
-    default=5,
-    show_default=True,
+    "-n", "--iterations", default=5, show_default=True,
     help="Maximum number of review/fix iterations.",
 )
 @click.option(
-    "-m",
-    "--model",
-    default=None,
+    "-m", "--model", default=None,
     help="Override the model (otherwise taken from config/env).",
 )
 @click.option(
-    "-o",
-    "--output",
-    type=click.Path(dir_okay=False, path_type=Path),
+    "-o", "--output",
+    type=click.Path(file_okay=False, path_type=Path),
     default=None,
-    help="Write the final code to this file.",
+    help="Write all generated files to this directory.",
 )
 @click.option(
-    "--backend",
-    type=click.Choice(["subprocess", "docker"]),
-    default="subprocess",
-    show_default=True)
+    "--backend", type=click.Choice(["subprocess", "docker"]),
+    default="subprocess", show_default=True,
+    help="Where to run the code.",
+)
 @click.option("-q", "--quiet", is_flag=True, help="Suppress step-by-step logs.")
 @click.option("-t", "--timeout", default=10, show_default=True,
               help="Seconds before a single execution is killed.")
@@ -85,15 +97,14 @@ def run(
         iterations: int,
         model: str | None,
         output: Path | None,
-        quiet: bool,
         backend: str,
-        timeout: int
+        quiet: bool,
+        timeout: int,
 ) -> None:
     """Generate, review and fix code for TASK."""
     # Creating the client here (a) lets us fail fast on a dead backend and
     # (b) seeds the module-level singleton that run_agent_loop() reuses, so a
-    # --model override propagates into the loop. This coupling is intentional
-    # for now and will be made explicit when the orchestrator is refactored.
+    # --model override propagates into the loop.
     client = get_client(model=model)
     _require_backend(client)
 
@@ -109,13 +120,23 @@ def run(
     click.echo()
     click.secho("===== FINAL CODE =====", fg="green", bold=True)
     click.echo(state.code or "(no code produced)")
+    _warn_if_unvalidated(state)
 
-    if output and state.code:
-        output.write_text(state.code, encoding="utf-8")
-        click.secho(f"\nSaved to {output}", fg="cyan")
+    if output and state.files_content:
+        _write_files_to(state.files_content, output)
 
     # Exit non-zero when the reviewer never approved, so the CLI is scriptable.
     raise SystemExit(0 if state.done else 2)
+
+
+def _write_files_to(files_content: dict, target_dir: Path) -> None:
+    """Write every generated file into target_dir, creating folders as needed."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for path, content in files_content.items():
+        file_path = target_dir / path
+        file_path.parent.mkdir(parents=True, exist_ok=True)  # ready for nested paths
+        file_path.write_text(content, encoding="utf-8")
+    click.secho(f"Saved {len(files_content)} files to {target_dir}", fg="cyan")
 
 
 @main.command()
@@ -172,7 +193,7 @@ def doctor() -> None:
 @click.option("-t", "--timeout", default=10, show_default=True,
               help="Seconds before a single execution is killed.")
 def chat(allow_exec, iterations, backend, quiet, timeout):
-    """Interactive session: send tasks one by one; /save <path>, /exit."""
+    """Interactive session: /save <path>, /context, /new, /exit."""
     last_state = None
     try:
         while True:
@@ -183,35 +204,32 @@ def chat(allow_exec, iterations, backend, quiet, timeout):
             if user_input.startswith("/"):
                 parts = user_input.split(maxsplit=1)
                 cmd = parts[0]
+
                 if cmd == "/exit":
                     break
+
                 elif cmd == "/context":
                     if last_state and last_state.files_content:
                         click.echo(f"Context: {list(last_state.files_content)}")
                     else:
                         click.echo("Context is empty.")
+
+                elif cmd == "/new":
+                    last_state = None
+                    click.echo("Session context cleared.")
+
                 elif cmd == "/save":
                     if len(parts) < 2:
                         click.echo("Usage: /save <path>")
                     elif last_state is None or not last_state.files_content:
                         click.echo("Nothing to save yet - run a task first.")
                     else:
-                        target_dir = Path(parts[1])
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        for path, content in last_state.files_content.items():
-                            file_path = target_dir / path
-                            file_path.parent.mkdir(parents=True, exist_ok=True)
-                            file_path.write_text(content, encoding="utf-8")
-                        click.secho(
-                            f"Saved {len(last_state.files_content)} files to {target_dir}",
-                            fg="cyan",
-                        )
-                elif cmd == "/new":
-                    last_state = None
-                    click.echo("Session context cleared.")
+                        _write_files_to(last_state.files_content, Path(parts[1]))
+
                 else:
                     click.echo(f"Unknown command: {cmd}")
-                continue
+
+                continue  # a command never reaches the model
 
             try:
                 last_state = run_agent_loop(
@@ -221,12 +239,14 @@ def chat(allow_exec, iterations, backend, quiet, timeout):
                     backend=backend,
                     verbose=not quiet,
                     timeout=timeout,
-                    last_state=last_state
+                    last_state=last_state,
                 )
             except Exception as e:
                 click.secho(f"Task failed: {e}", fg="red", err=True)
                 continue
+
             click.echo(last_state.code or "(no code produced)")
+            _warn_if_unvalidated(last_state)
     except (KeyboardInterrupt, EOFError):
         click.echo("\nBye!")
 

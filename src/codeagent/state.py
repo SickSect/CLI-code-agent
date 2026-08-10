@@ -2,6 +2,8 @@ from typing import Optional
 
 
 class AgentState:
+    """Everything one task produces, plus what carries over between tasks."""
+
     def __init__(self, max_iterations: Optional[int] = 5, lang: str = "python"):
         self.task = None
         self.plan = None
@@ -17,6 +19,10 @@ class AgentState:
         self.entry = None           # file to run, e.g. "main.py"
         self.files_content = None   # produced files: {path: content}
         self.previous_files = None  # all files from the previous task (session memory)
+        # True until something tells us otherwise: False means the code could
+        # not be checked (no toolchain, unknown language), not that it is wrong.
+        self.validated = True
+        self.validation_note = None  # why validation was skipped, if it was
 
     def increment(self):
         if self.iteration >= self.max_iterations:
@@ -39,3 +45,5 @@ class AgentState:
         self.entry = None
         self.files = None
         self.files_content = None
+        self.validated = True
+        self.validation_note = None

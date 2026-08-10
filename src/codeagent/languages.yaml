@@ -1,0 +1,109 @@
+# How to run each language.
+#
+#   image        Docker image used when the local toolchain is missing
+#   tools        local executables, in order of preference (first found wins)
+#   docker_tool  executable name inside the image, if it differs from tools[0]
+#   steps        commands to run in order; a build step comes before the run step
+#
+# Placeholders substituted at run time:
+#   {tool}    the resolved executable (local name, or docker_tool in a container)
+#   {entry}   the file to run, e.g. main.py
+#   {binary}  path for build output (app on Linux, app.exe on Windows)
+#   {stem}    entry file without its extension, e.g. Main for Main.java
+
+# Runtimes that reserve a huge virtual address space at startup (V8, JVM, Go's
+# allocator, .NET). Capping RLIMIT_AS kills them before they run a line, so the
+# address-space limit is skipped for these; Docker still caps their memory.
+vm_languages: ["javascript", "java", "csharp", "go", "swift", "kotlin"]
+
+languages:
+
+  # --- interpreted: one step, run the file directly ---
+
+  python:
+    image: "python:3.12-slim"
+    tools: ["python3", "python"]
+    docker_tool: "python"
+    steps:
+      - ["{tool}", "{entry}"]
+
+  javascript:
+    image: "node:20-slim"
+    tools: ["node"]
+    steps:
+      - ["{tool}", "{entry}"]
+
+  ruby:
+    image: "ruby:slim"
+    tools: ["ruby"]
+    steps:
+      - ["{tool}", "{entry}"]
+
+  php:
+    image: "php:cli-alpine"
+    tools: ["php"]
+    steps:
+      - ["{tool}", "{entry}"]
+
+  bash:
+    image: "bash:latest"
+    tools: ["bash", "sh"]
+    docker_tool: "bash"
+    steps:
+      - ["{tool}", "{entry}"]
+
+  # `go run` builds to a temporary binary and executes it in one command.
+  go:
+    image: "golang:alpine"
+    tools: ["go"]
+    steps:
+      - ["{tool}", "run", "{entry}"]
+
+  # --- compiled: build first, then run the artifact ---
+
+  c:
+    image: "gcc:latest"
+    tools: ["gcc", "clang", "cc"]
+    docker_tool: "gcc"
+    steps:
+      - ["{tool}", "{entry}", "-o", "{binary}"]
+      - ["{binary}"]
+
+  cpp:
+    image: "gcc:latest"
+    tools: ["g++", "clang++", "c++"]
+    docker_tool: "g++"
+    steps:
+      - ["{tool}", "{entry}", "-std=c++17", "-o", "{binary}"]
+      - ["{binary}"]
+
+  rust:
+    image: "rust:slim"
+    tools: ["rustc"]
+    steps:
+      - ["{tool}", "--edition=2021", "{entry}", "-o", "{binary}"]
+      - ["{binary}"]
+
+  # javac writes .class files into the working directory; `java` then runs the
+  # class named after the entry file.
+  java:
+    image: "eclipse-temurin:21-jdk"
+    tools: ["javac"]
+    steps:
+      - ["{tool}", "-d", ".", "{entry}"]
+      - ["java", "-cp", ".", "{stem}"]
+
+  csharp:
+    image: "mono:latest"
+    tools: ["csc", "mcs"]
+    docker_tool: "mcs"
+    steps:
+      - ["{tool}", "-nologo", "-out:app.exe", "{entry}"]
+      - ["mono", "app.exe"]
+
+  swift:
+    image: "swift:slim"
+    tools: ["swiftc"]
+    steps:
+      - ["{tool}", "{entry}", "-o", "{binary}"]
+      - ["{binary}"]
