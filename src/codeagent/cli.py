@@ -5,13 +5,20 @@ This module provides the ``codeagent`` console script declared in
 It is a thin Click wrapper around :func:`codeagent.orchestrator.run_agent_loop`
 plus a couple of helper commands for inspecting the local Ollama backend.
 """
-
+import json
+import logging
+import struct
 from pathlib import Path
 
 import click
 
 from codeagent.client import get_client
 from codeagent.orchestrator import run_agent_loop
+import subprocess
+import socket
+import time
+import sys
+from pathlib import Path
 
 
 # --------------------------------------------------------------------------
@@ -29,6 +36,36 @@ def common_run_options(func):
     without it the flags would show up backwards in --help.
     """
     options = [
+        click.option(
+            "--exec/--no-exec", "allow_exec", default=False,
+            help="Actually run the generated code in a sandbox "
+                 "(default: static check only).",
+        ),
+        click.option(
+            "-n", "--iterations", default=5, show_default=True,
+            help="Maximum number of review/fix iterations.",
+        ),
+        click.option(
+            "--backend", type=click.Choice(["subprocess", "docker"]),
+            default="subprocess", show_default=True,
+            help="Where to run the code.",
+        ),
+        click.option(
+            "-t", "--timeout", default=10, show_default=True,
+            help="Seconds before a single execution is killed.",
+        ),
+        click.option("-q", "--quiet", is_flag=True, help="Suppress step-by-step logs."),
+    ]
+    for option in reversed(options):
+        func = option(func)
+    return func
+
+def bridge_common_run_options(func):
+    options = [
+        click.option(
+            "--port", "-p", default=8080, show_default=True,
+            help="Port to run the code on.",
+        ),
         click.option(
             "--exec/--no-exec", "allow_exec", default=False,
             help="Actually run the generated code in a sandbox "
@@ -207,6 +244,70 @@ def chat(allow_exec, iterations, backend, timeout, quiet):
             _warn_if_unvalidated(last_state)
     except (KeyboardInterrupt, EOFError):
         click.echo("\nBye!")
+
+def recv_message(conn):
+    size_data = conn.recv(4)
+    if not size_data:
+        return None
+    size = struct.unpack(">I", size_data)[0]
+    data = b''
+    while len(data) < size:
+        chunk = conn.recv(min(4096, size-len(data)))
+        if not chunk:
+            raise ConnectionError("[BRIDGE] Connection closed")
+        data += chunk
+    return json.loads(data.decode("utf-8"))
+
+def send_answer(conn, answer):
+    try:
+        json_bytes = json.dumps(answer, ensure_ascii=False).encode('utf-8')
+        conn.send(struct.pack('>I', len(json_bytes)))
+        conn.send(json_bytes)
+    except Exception as e:
+        click.secho(f"[BRIDGE] Ошибка отправки: {e}", fg="red", err=True)
+
+@main.command()
+@bridge_common_run_options
+def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(('127.0.0.1', port))
+    server_socket.listen(1)
+
+    logging.log(level=logging.INFO, msg = '[BRIDGE] Waiting for connection...')
+    conn, addr = server_socket.accept()
+    logging.log(level=logging.INFO, msg = '[BRIDGE] Connected! address:' + addr)
+    running_flag = True
+    last_state = None
+    while running_flag:
+        msg = recv_message(conn)
+        if msg is None:
+            running_flag = False
+            _handle_command("/exit", last_state)
+        elif msg.startswith('/'):
+            _handle_command(msg, last_state)
+        else:
+            try:
+                last_state = run_agent_loop(
+                    msg,
+                    allow_exec=allow_exec,
+                    max_iterations=iterations,
+                    backend=backend,
+                    verbose=not quiet,
+                    timeout=timeout,
+                    last_state=last_state,
+                )
+            except Exception as e:
+                click.secho(f"Task failed: {e}", fg="red", err=True)
+                continue
+            click.echo(last_state.code or "(no code produced)")
+            _warn_if_unvalidated(last_state)
+            # TODO необходимо сделать удобный формат для ответа, дабы удобно было парсить все в чате
+        send_answer(msg, {
+            "status": last_state.done,
+            "code": last_state.code
+        })
+
 
 
 def _handle_command(user_input: str, last_state) -> None:
