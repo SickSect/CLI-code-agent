@@ -1,12 +1,12 @@
-model: glm-5.2:cloud
+model: gemma4:26b
 host: http://localhost:11434
 timeout: 120
 
 models:
-  planner: llama3.1:8b
-  coder: qwen2.5-coder:7b
-  reviewer: qwen2.5:7b
-  fixer: qwen2.5-coder:7b
+  planner: gemma4:26b
+  coder: gemma4:26b
+  reviewer: gemma4:26b
+  fixer: gemma4:26b
 
 defaults:
   backend: subprocess
