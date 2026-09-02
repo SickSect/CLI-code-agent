@@ -17,10 +17,12 @@ class AgentConnector:
         self.backend_mode = backend_mode
 
         if b_app_path is None:
-            logging.warn('[FRONT] AGent starter does not have definite b_app_path, will use default value.')
-            b_app_path = Path(__file__).parent / "codeagent" / "cli.py"
+            logging.warn('[FRONT] Agent starter does not have definite b_app_path, will use default value.')
+            b_app_path = Path(__file__).parent.parent / 'codeagent' / 'cli.py'
+            logging.warn('[FRONT] Agent starter uses b_app_path, will use default value ' + str(b_app_path))
             if not b_app_path.exists():
                 logging.error('[FRONT] Did not find b_app_path.')
+                sys.exit()
             else:
                 self.b_app_path = b_app_path
 
@@ -40,15 +42,14 @@ class AgentConnector:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=False,
-                bufsize=1,
-                universal_newlines=True
+                bufsize=1
             )
 
             # Запускаем потоки для чтения логов
             import threading
             threading.Thread(target=self._read_stdout, daemon=True).start()
             threading.Thread(target=self._read_stderr, daemon=True).start()
-
+            time.sleep(5)
             logging.info('[FRONT] Agent started.')
             return True
         except FileNotFoundError:
