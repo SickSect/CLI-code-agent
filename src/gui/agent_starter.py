@@ -9,27 +9,41 @@ from pathlib import Path
 
 
 class AgentConnector:
-    def __init__(self, port=9999, b_app_path=None, backend_mode = 'subprocess'):
+    def __init__(self, port=9999, b_app_path=None, backend_mode='subprocess'):
         self.port = port
-        self.process = None # future back end listener
-        self.socket = None # will init later
+        self.process = None  # future back end listener
+        self.socket = None  # will init later
         self.connected = False
         self.backend_mode = backend_mode
 
         if b_app_path is None:
-            logging.warn('[FRONT] AGent starter does not have definite b_app_path, will use default value.')
-            b_app_path = Path(__file__).parent / "codeagent" / "cli.py"
-            if not b_app_path.exists():
-                logging.error('[FRONT] Did not find b_app_path.')
+            # Ищем cli.py относительно корня проекта
+            possible_paths = [
+                Path(__file__).parent.parent / "codeagent" / "cli.py",
+                Path(__file__).parent / "codeagent" / "cli.py",
+                Path("/workspace/src/codeagent/cli.py"),
+            ]
+            for path in possible_paths:
+                if path.exists():
+                    self.b_app_path = path
+                    logging.info(f'[FRONT] Found cli.py at {self.b_app_path}')
+                    break
             else:
-                self.b_app_path = b_app_path
+                logging.error('[FRONT] Did not find cli.py in any expected location.')
+                self.b_app_path = None
+        else:
+            self.b_app_path = Path(b_app_path)
 
     def start_agent_app(self):
+        if self.b_app_path is None:
+            logging.error('[FRONT] Cannot start agent: cli.py not found.')
+            return False
+        
         try:
             self.process = subprocess.Popen(
                 [
                     sys.executable,
-                    self.b_app_path,
+                    str(self.b_app_path),
                     "bridge",
                     "--port", str(self.port),
                     "--exec",
@@ -50,9 +64,16 @@ class AgentConnector:
             threading.Thread(target=self._read_stderr, daemon=True).start()
 
             logging.info('[FRONT] Agent started.')
+            
+            # Даем агенту время запуститься и начать слушать порт
+            time.sleep(1)
+            
             return True
         except FileNotFoundError:
-            logging.error('[FRONT] Could not find b_app_path.')
+            logging.error(f'[FRONT] Could not find b_app_path: {self.b_app_path}')
+            return False
+        except Exception as e:
+            logging.error(f'[FRONT] Failed to start agent: {e}')
             return False
 
     def _read_stdout(self):
@@ -70,8 +91,15 @@ class AgentConnector:
         logging.info('[FRONT] Start creating connection.')
 
         # Проверяем жив ли процесс
-        if self.process and self.process.poll() is not None:
+        if self.process is None:
+            logging.error('[FRONT] Agent process not started.')
+            return False
+        
+        if self.process.poll() is not None:
+            stdout, stderr = self.process.communicate()
             logging.error(f'[FRONT] Agent process died with code: {self.process.returncode}')
+            if stderr:
+                logging.error(f'[FRONT] Agent stderr: {stderr.decode()}')
             return False
 
         for att in range(connection_attempts):
