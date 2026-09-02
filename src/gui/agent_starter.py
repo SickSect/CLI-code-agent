@@ -17,17 +17,12 @@ class AgentConnector:
         self.backend_mode = backend_mode
 
         if b_app_path is None:
-            # Ищем cli.py относительно корня проекта
-            possible_paths = [
-                Path(__file__).parent.parent / "codeagent" / "cli.py",
-                Path(__file__).parent / "codeagent" / "cli.py",
-                Path("/workspace/src/codeagent/cli.py"),
-            ]
-            for path in possible_paths:
-                if path.exists():
-                    self.b_app_path = path
-                    logging.info(f'[FRONT] Found cli.py at {self.b_app_path}')
-                    break
+            logging.warn('[FRONT] Agent starter does not have definite b_app_path, will use default value.')
+            b_app_path = Path(__file__).parent.parent / 'codeagent' / 'cli.py'
+            logging.warn('[FRONT] Agent starter uses b_app_path, will use default value ' + str(b_app_path))
+            if not b_app_path.exists():
+                logging.error('[FRONT] Did not find b_app_path.')
+                sys.exit()
             else:
                 logging.error('[FRONT] Did not find cli.py in any expected location.')
                 self.b_app_path = None
@@ -54,15 +49,14 @@ class AgentConnector:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=False,
-                bufsize=1,
-                universal_newlines=True
+                bufsize=1
             )
 
             # Запускаем потоки для чтения логов
             import threading
             threading.Thread(target=self._read_stdout, daemon=True).start()
             threading.Thread(target=self._read_stderr, daemon=True).start()
-
+            time.sleep(5)
             logging.info('[FRONT] Agent started.')
             
             # Даем агенту время запуститься и начать слушать порт
