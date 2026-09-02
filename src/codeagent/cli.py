@@ -25,6 +25,19 @@ from pathlib import Path
 # Shared option set
 # --------------------------------------------------------------------------
 
+import logging
+import sys
+
+# Добавь в начало файла, после импортов
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Вывод в stdout
+        logging.FileHandler('codeagent.log')  # И в файл
+    ]
+)
+
 def common_run_options(func):
     """Attach the options that `run` and `chat` both accept.
 
@@ -63,7 +76,7 @@ def common_run_options(func):
 def bridge_common_run_options(func):
     options = [
         click.option(
-            "--port", "-p", default=8080, show_default=True,
+            "--port", "-p", default=9999, show_default=True,
             help="Port to run the code on.",
         ),
         click.option(
@@ -266,6 +279,7 @@ def send_answer(conn, answer):
     except Exception as e:
         click.secho(f"[BRIDGE] Ошибка отправки: {e}", fg="red", err=True)
 
+
 @main.command()
 @bridge_common_run_options
 def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
@@ -274,18 +288,29 @@ def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
     server_socket.bind(('127.0.0.1', port))
     server_socket.listen(1)
 
-    logging.log(level=logging.INFO, msg = '[BRIDGE] Waiting for connection...')
+    logging.info('[BRIDGE] Waiting for connection...')
     conn, addr = server_socket.accept()
-    logging.log(level=logging.INFO, msg = '[BRIDGE] Connected! address:' + addr)
+    logging.info(f'[BRIDGE] Connected! address: {addr}')
+
     running_flag = True
     last_state = None
+
     while running_flag:
         msg = recv_message(conn)
+
         if msg is None:
+            logging.info('[BRIDGE] Connection closed by client')
             running_flag = False
-            _handle_command("/exit", last_state)
+            break  # Выходим из цикла, не отправляем ответ
+
         elif msg.startswith('/'):
             _handle_command(msg, last_state)
+            # Для команд не отправляем ответ, или отправляем подтверждение
+            send_answer(conn, {
+                "status": "ok",
+                "code": f"Command {msg} executed"
+            })
+
         else:
             try:
                 last_state = run_agent_loop(
@@ -299,15 +324,21 @@ def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
                 )
             except Exception as e:
                 click.secho(f"Task failed: {e}", fg="red", err=True)
+                # Отправляем ошибку
+                send_answer(conn, {
+                    "status": False,
+                    "code": f"Error: {str(e)}"
+                })
                 continue
+
             click.echo(last_state.code or "(no code produced)")
             _warn_if_unvalidated(last_state)
-            # TODO необходимо сделать удобный формат для ответа, дабы удобно было парсить все в чате
-        send_answer(msg, {
-            "status": last_state.done,
-            "code": last_state.code
-        })
 
+            # Отправляем результат
+            send_answer(conn, {
+                "status": last_state.done if last_state else False,
+                "code": last_state.code if last_state else ""
+            })
 
 
 def _handle_command(user_input: str, last_state) -> None:

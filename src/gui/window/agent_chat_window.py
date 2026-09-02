@@ -3,14 +3,17 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTe
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
+from gui.agent_starter import AgentConnector
 from gui.style.style import get_theme
 
 
 # Если запускаешь напрямую как скрипт, возможно придется использовать: from style import get_theme
 
 class AgentWindowChat(QMainWindow):
-    def __init__(self):
+    def __init__(self, agent: AgentConnector):
         super().__init__()
+
+        self.agent = agent
 
         # --- Настройка окна ---
         self.setWindowTitle("AI Code Agent")
@@ -56,12 +59,21 @@ class AgentWindowChat(QMainWindow):
         if not text:
             return
 
-        self.append_to_chat(f"<b style='color: #4fc3f7;'>Вы:</b> {text}")
+        # Сообщение пользователя - справа
+        self.append_to_chat(
+            f"<div align='right' style='background: #1e3a5f; padding: 8px 12px; border-radius: 12px; margin: 4px 0; color: #4fc3f7;'>"
+            f"<b>Вы:</b> {text}</div>"
+        )
         self.input_field.clear()
 
-        # Имитация ответа (позже заменим на реальный бэкэнд)
-        self.append_to_chat(f"<b style='color: #81c784;'>Агент:</b> Получил задачу: '{text}'. Обрабатываю...",
-                            is_system=True)
+        response = self.agent.send_msg(text)
+
+        # Ответ агента - слева
+        self.append_to_chat(
+            f"<div align='left' style='background: #2d2d2d; padding: 8px 12px; border-radius: 12px; margin: 4px 0; color: #e0e0e0;'>"
+            f"<b>Агент:</b> {response}</div>"
+        )
+
 
     def append_to_chat(self, message, is_system=False):
         self.chat_area.append(message)
