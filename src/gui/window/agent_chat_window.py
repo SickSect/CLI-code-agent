@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from gui.agent_starter import AgentConnector
+from gui.style.chat_msg_style import get_client_chat_style, get_agent_chat_style
 from gui.style.style import get_theme
 
 
@@ -60,19 +61,13 @@ class AgentWindowChat(QMainWindow):
             return
 
         # Сообщение пользователя - справа
-        self.append_to_chat(
-            f"<div align='right' style='background: #1e3a5f; padding: 8px 12px; border-radius: 12px; margin: 4px 0; color: #4fc3f7;'>"
-            f"<b>Вы:</b> {text}</div>"
-        )
+        self.append_to_chat(get_client_chat_style(text))
         self.input_field.clear()
 
         response = self.agent.send_msg(text)
 
         # Ответ агента - слева
-        self.append_to_chat(
-            f"<div align='left' style='background: #2d2d2d; padding: 8px 12px; border-radius: 12px; margin: 4px 0; color: #e0e0e0;'>"
-            f"<b>Агент:</b> {response}</div>"
-        )
+        self.append_to_chat(get_agent_chat_style(response))
 
 
     def append_to_chat(self, message, is_system=False):

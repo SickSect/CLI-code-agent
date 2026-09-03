@@ -76,7 +76,7 @@ def common_run_options(func):
 def bridge_common_run_options(func):
     options = [
         click.option(
-            "--port", "-p", default=9999, show_default=True,
+            "--port", "-p", default=8082, show_default=True,
             help="Port to run the code on.",
         ),
         click.option(

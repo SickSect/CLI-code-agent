@@ -22,8 +22,10 @@ def main():
         connection_success = agent.start_agent_app()
         if connection_success:
             # GUI START
+            agent.create_connection(10)
             window = AgentWindowChat(agent)
             window.show()
+
         else:
             raise ConnectionError('Connection failed')
     except Exception as e:

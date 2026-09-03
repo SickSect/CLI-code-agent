@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class AgentConnector:
-    def __init__(self, port=9999, b_app_path=None, backend_mode = 'subprocess'):
+    def __init__(self, port=8082, b_app_path=None, backend_mode = 'subprocess'):
         self.port = port
         self.process = None # future back end listener
         self.socket = None # will init later
@@ -27,7 +27,11 @@ class AgentConnector:
                 self.b_app_path = b_app_path
 
     def start_agent_app(self):
+        logging.info('[AGENT_CONNECTOR] trying start process ' + str(self.b_app_path))
         try:
+            import os
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
             self.process = subprocess.Popen(
                 [
                     sys.executable,
@@ -42,30 +46,52 @@ class AgentConnector:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=False,
-                bufsize=1
+                bufsize=0,
+                env=env
             )
 
             # Запускаем потоки для чтения логов
             import threading
             threading.Thread(target=self._read_stdout, daemon=True).start()
             threading.Thread(target=self._read_stderr, daemon=True).start()
-            time.sleep(5)
-            logging.info('[FRONT] Agent started.')
-            return True
-        except FileNotFoundError:
-            logging.error('[FRONT] Could not find b_app_path.')
-            return False
+            time.sleep(10)
+            if self.process.poll() is None:
+                logging.info('[FRONT] Agent started successfully.')
+                return True
+            else:
+                logging.error(f'[FRONT] Agent died immediately with code: {self.process.returncode}')
+                return False
+        except Exception as e:
+            logging.error('[AGENT_CONNECTOR] Failed to start agent.')
 
     def _read_stdout(self):
-        for line in iter(self.process.stdout.readline, b''):
-            if line:
-                logging.info(f'[AGENT STDOUT] {line.decode().strip()}')
+        """Читает stdout в реальном времени"""
+        try:
+            # Используем text=True для чтения строк
+            for line in iter(self.process.stdout.readline, b''):
+                if line:
+                    # Декодируем байты в строку
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if line_str:
+                        logging.info(f'[AGENT STDOUT] {line_str}')
+                        # Дублируем в консоль для уверенности
+                        print(f'[AGENT STDOUT] {line_str}')
+                        sys.stdout.flush()
+        except Exception as e:
+            logging.error(f'[AGENT STDOUT] Read error: {e}')
 
     def _read_stderr(self):
-        for line in iter(self.process.stderr.readline, b''):
-            if line:
-                logging.error(f'[AGENT STDERR] {line.decode().strip()}')
-
+        """Читает stderr в реальном времени"""
+        try:
+            for line in iter(self.process.stderr.readline, b''):
+                if line:
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if line_str:
+                        logging.error(f'[AGENT STDERR] {line_str}')
+                        print(f'[AGENT STDERR] {line_str}')
+                        sys.stderr.flush()
+        except Exception as e:
+            logging.error(f'[AGENT STDERR] Read error: {e}')
     # Добавь проверку в create_connection
     def create_connection(self, connection_attempts=10):
         logging.info('[FRONT] Start creating connection.')
