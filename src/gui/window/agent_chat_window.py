@@ -1,6 +1,6 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton, QLabel
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
 
 from gui.agent_starter import AgentConnector
@@ -18,7 +18,7 @@ class AgentWindowChat(QMainWindow):
 
         # --- Настройка окна ---
         self.setWindowTitle("AI Code Agent")
-        self.setGeometry(100, 100, 900, 700)
+        self.setGeometry(100, 100, 500, 500)
 
         # --- Применение стилей ---
         # Берем строку CSS из файла style.py и применяем ко всему окну
@@ -48,6 +48,10 @@ class AgentWindowChat(QMainWindow):
         self.send_button = QPushButton("Отправить")
         layout.addWidget(self.send_button)
 
+        self.chat_area.setObjectName("chatArea")
+        self.input_field.setObjectName("inputField")
+        self.send_button.setObjectName("sendButton")
+
         # --- Подключение событий ---
         self.input_field.returnPressed.connect(self.send_command)
         self.send_button.clicked.connect(self.send_command)
@@ -69,9 +73,36 @@ class AgentWindowChat(QMainWindow):
         # Ответ агента - слева
         self.append_to_chat(get_agent_chat_style(response))
 
-
     def append_to_chat(self, message, is_system=False):
+        # Создаем виджет для сообщения с анимацией
+        msg_widget = QLabel(message)
+        msg_widget.setTextFormat(Qt.TextFormat.RichText)
+        msg_widget.setWordWrap(True)
+        msg_widget.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                padding: 8px 12px;
+                margin: 4px 0px;
+                border-radius: 8px;
+            }
+        """)
+
+        # Добавляем в чат
         self.chat_area.append(message)
-        # Автопрокрутка вниз
+
+        # Анимация появления (применяется к последнему добавленному блоку)
+        # Для простоты используем стандартный scroll
         scrollbar = self.chat_area.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+
+        # Анимируем прокрутку вниз
+        animation = QPropertyAnimation(scrollbar, b"value")
+        animation.setDuration(300)
+        animation.setStartValue(scrollbar.value())
+        animation.setEndValue(scrollbar.maximum())
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.start()
+
+        # Сохраняем анимацию чтобы не удалилась
+        if not hasattr(self, '_animations'):
+            self._animations = []
+        self._animations.append(animation)
