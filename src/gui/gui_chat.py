@@ -38,7 +38,8 @@ def main():
             # Сохраняем в настройках
             settings = QSettings('MyCompany', 'CodeAgent')
             settings.setValue('working_directory', working_dir)
-
+        else:
+            sys.exit(1)
         agent = AgentConnector(
             port=9999,
             backend_mode='subprocess'

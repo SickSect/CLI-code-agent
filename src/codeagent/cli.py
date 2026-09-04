@@ -8,6 +8,7 @@ plus a couple of helper commands for inspecting the local Ollama backend.
 import json
 import logging
 import struct
+from email.policy import default
 from pathlib import Path
 
 import click
@@ -68,6 +69,10 @@ def common_run_options(func):
             help="Seconds before a single execution is killed.",
         ),
         click.option("-q", "--quiet", is_flag=True, help="Suppress step-by-step logs."),
+        click.option(
+            "-wd", "--workdir", default=None, show_default=True,
+            help="Working directory to run the code in.",
+        )
     ]
     for option in reversed(options):
         func = option(func)
@@ -282,7 +287,7 @@ def send_answer(conn, answer):
 
 @main.command()
 @bridge_common_run_options
-def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
+def bridge(port: int, allow_exec, iterations, backend, timeout, quiet, workdir):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('127.0.0.1', port))
@@ -341,7 +346,7 @@ def bridge(port: int, allow_exec, iterations, backend, timeout, quiet):
             })
 
 
-def _handle_command(user_input: str, last_state) -> None:
+def _handle_command(user_input: str, last_state, workdir=None) -> None:
     """Run one /slash command. Session state is reset by the caller."""
     parts = user_input.split(maxsplit=1)
     cmd = parts[0]
@@ -366,7 +371,10 @@ def _handle_command(user_input: str, last_state) -> None:
         elif last_state is None or not last_state.files_content:
             click.echo("Nothing to save yet - run a task first.")
         else:
-            _write_files_to(last_state.files_content, Path(parts[1]))
+            if workdir is None:
+                _write_files_to(last_state.files_content, Path(parts[1]))
+            else:
+                _write_files_to(last_state.files_content, workdir)
         return
 
     click.echo(f"Unknown command: {cmd}")
