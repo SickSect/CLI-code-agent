@@ -7,6 +7,7 @@ from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from gui.agent_starter import AgentConnector
+from gui.settings import GuiSettings
 from gui.window.agent_chat_window import AgentWindowChat
 from gui.window.dir_selection_window import DirectorySelectionDialog
 
@@ -24,7 +25,7 @@ def main():
         if dir_dialog.exec() == QDialog.DialogCode.Accepted:
             working_dir = dir_dialog.get_directory()
             if not working_dir:
-                QMessageBox.warning(None, "Ошибка", "Директория не выбрана!")
+                QMessageBox.warning(None, "ERROR", "Directory selection failed!")
                 sys.exit(1)
 
             # Проверяем доступность директории
@@ -32,17 +33,19 @@ def main():
                 try:
                     os.makedirs(working_dir, exist_ok=True)
                 except Exception as e:
-                    QMessageBox.critical(None, "Ошибка", f"Не удалось создать директорию:\n{str(e)}")
+                    QMessageBox.critical(None, "ERROR", f"Could not chose directory:\n{str(e)}")
                     sys.exit(1)
 
             # Сохраняем в настройках
             settings = QSettings('MyCompany', 'CodeAgent')
-            settings.setValue('working_directory', working_dir)
+            gui_settings = GuiSettings(working_dir,
+                                      'subprocess',
+                                      port=9999)
         else:
             sys.exit(1)
         agent = AgentConnector(
-            port=9999,
-            backend_mode='subprocess'
+            port=gui_settings.port,
+            backend_mode=gui_settings.backend_mode
         )
         connection_success = agent.start_agent_app()
         if connection_success:
